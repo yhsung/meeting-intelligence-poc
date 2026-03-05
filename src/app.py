@@ -221,7 +221,7 @@ st.markdown(
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@400;500&family=Instrument+Sans:ital,wght@0,400;0,500;0,600;1,400&display=swap" rel="stylesheet">
-
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@24,400,0,0" rel="stylesheet">
 
     <style>
     /* ── Variables ──────────────────────────────────────────── */
@@ -278,16 +278,11 @@ st.markdown(
         padding: 1.75rem 1.25rem !important;
     }
     [data-testid="stSidebar"] p,
-    [data-testid="stSidebar"] span,
+    [data-testid="stSidebar"] span:not(.material-symbols-rounded):not([data-testid="stIconMaterial"]),
     [data-testid="stSidebar"] label,
     [data-testid="stSidebar"] div {
         color: var(--text-mid) !important;
         font-family: 'Instrument Sans', sans-serif !important;
-    }
-
-    /* ── Sidebar collapse button ───────────────────────────── */
-    [data-testid="stSidebarCollapseButton"] {
-        display: none !important;
     }
 
     /* ── Typography ─────────────────────────────────────────── */
