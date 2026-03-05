@@ -182,6 +182,26 @@ def render_source_card(source):
     )
 
 
+def render_active_sources_tag(titles: list[str]):
+    if not titles:
+        return
+    pills = " ".join(
+        f'<span style="'
+        f'font-family:\'JetBrains Mono\',monospace;font-size:0.62rem;'
+        f'color:#0891B2;background:rgba(34,211,238,0.07);'
+        f'border:1px solid rgba(34,211,238,0.2);border-radius:4px;'
+        f'padding:2px 7px;white-space:nowrap">{t}</span>'
+        for t in titles
+    )
+    st.markdown(
+        f'<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:4px;align-items:center">'
+        f'<span style="font-family:\'JetBrains Mono\',monospace;font-size:0.58rem;'
+        f'color:#334155;letter-spacing:0.1em;text-transform:uppercase;margin-right:2px">'
+        f'sources</span>{pills}</div>',
+        unsafe_allow_html=True,
+    )
+
+
 def extract_video_id(url: str) -> str | None:
     import re
     m = re.search(r"(?:v=|youtu\.be/|embed/|shorts/)([A-Za-z0-9_-]{11})", url)
@@ -674,6 +694,8 @@ st.divider()
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
+        if msg["role"] == "user" and msg.get("active_titles"):
+            render_active_sources_tag(msg["active_titles"])
         if msg["role"] == "assistant" and msg.get("sources"):
             with st.expander("SOURCES", expanded=False):
                 for src in msg["sources"]:
@@ -688,9 +710,20 @@ if user_input:
     if not st.session_state.selected_video_ids:
         st.warning("Select at least one meeting from the sidebar first.")
     else:
-        st.session_state.messages.append({"role": "user", "content": user_input, "sources": []})
+        active_titles = [
+            m["title"]
+            for m in st.session_state.indexed_meetings
+            if m["video_id"] in st.session_state.selected_video_ids
+        ]
+        st.session_state.messages.append({
+            "role": "user",
+            "content": user_input,
+            "active_titles": active_titles,
+            "sources": [],
+        })
         with st.chat_message("user"):
             st.markdown(user_input)
+            render_active_sources_tag(active_titles)
 
         with st.chat_message("assistant"):
             with st.spinner("Searching meetings..."):
