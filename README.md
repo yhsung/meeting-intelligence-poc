@@ -111,6 +111,39 @@ OPENAI_API_KEY=sk-xxx
 LLM_MODEL=gpt-4o
 ```
 
+## 自訂主題
+
+本專案使用 Streamlit 原生的 [theming system](https://docs.streamlit.io/develop/concepts/configuration/theming) 搭配自訂字型與 CSS 來定義介面風格。相關資產不納入版本控制，需在本機建立：
+
+### `.streamlit/config.toml`
+
+透過 `[theme]` 區塊設定色彩、字型、圓角等，並用 `[[theme.fontFaces]]` 載入本地字型檔。範例：
+
+```toml
+[server]
+enableStaticServing = true
+
+[theme]
+primaryColor = "#cb785c"
+backgroundColor = "#fdfdf8"
+secondaryBackgroundColor = "#ecebe3"
+textColor = "#3d3a2a"
+font = "SpaceGrotesk"
+codeFont = "SpaceMono"
+
+[[theme.fontFaces]]
+family = "SpaceGrotesk"
+url = "app/static/SpaceGrotesk-VariableFont_wght.ttf"
+```
+
+### `static/`
+
+將字型檔（如 `.ttf`）放在專案根目錄的 `static/` 資料夾，Streamlit 在 `enableStaticServing = true` 時會自動提供 `/app/static/` 路徑。
+
+### `src/style.css`
+
+額外的 CSS 覆寫透過 `src/style.css` 注入（已納入版本控制），用於微調 Streamlit 預設元件的外觀。
+
 ## 專案文件
 
 - [PROPOSAL.md](PROPOSAL.md) — 產品提案與價值主張

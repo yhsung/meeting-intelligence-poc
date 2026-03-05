@@ -154,7 +154,8 @@ cython_debug/
 .pypirc
 
 # Streamlit
-.streamlit/secrets.toml
+.streamlit/
+static/
 
 # macOS
 .DS_Store
