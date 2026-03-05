@@ -221,7 +221,7 @@ st.markdown(
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@400;500&family=Instrument+Sans:ital,wght@0,400;0,500;0,600;1,400&display=swap" rel="stylesheet">
-    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+
 
     <style>
     /* ── Variables ──────────────────────────────────────────── */
@@ -283,6 +283,11 @@ st.markdown(
     [data-testid="stSidebar"] div {
         color: var(--text-mid) !important;
         font-family: 'Instrument Sans', sans-serif !important;
+    }
+
+    /* ── Sidebar collapse button ───────────────────────────── */
+    [data-testid="stSidebarCollapseButton"] {
+        display: none !important;
     }
 
     /* ── Typography ─────────────────────────────────────────── */
@@ -503,7 +508,7 @@ with st.sidebar:
                 color: #E2E8F0;
                 letter-spacing: -0.01em;
                 line-height: 1.2;
-            ">MEETING<br><span style="color:#22D3EE">INTEL</span></div>
+            ">MEETING<br><span style="color:#22D3EE">INTELLIGENCE</span></div>
             <div style="
                 font-family: 'JetBrains Mono', monospace;
                 font-size: 0.6rem;
