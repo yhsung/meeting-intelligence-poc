@@ -578,11 +578,18 @@ with st.sidebar:
                     new_meeting = mock_add_meeting(url)
                 else:
                     with st.spinner("Fetching transcript..."):
-                        transcript = fetcher.fetch(url)
+                        transcript = fetcher.fetch_transcript(url)
+                        video_id = transcript["video_id"]
+                        transcript_path = f"data/transcripts/{video_id}.json"
                     with st.spinner("Creating embeddings..."):
-                        chunks = chunker.chunk(transcript)
+                        chunks = chunker.process_transcript(transcript_path)
                     with st.spinner("Indexing..."):
-                        new_meeting = vector_store.index_and_return(chunks)
+                        _get_store().add_meeting(video_id, chunks)
+                    new_meeting = {
+                        "video_id": video_id,
+                        "title": transcript["title"],
+                        "chunk_count": len(chunks),
+                    }
 
                 existing_ids = {m["video_id"] for m in st.session_state.indexed_meetings}
                 if new_meeting["video_id"] not in existing_ids:
