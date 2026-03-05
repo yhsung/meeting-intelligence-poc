@@ -100,9 +100,10 @@ def real_ask(question: str, video_ids):
 def render_source_card(source):
     st.markdown(
         f"""
-    <div style="background:#f0f2f6;border-radius:8px;padding:12px;margin:4px 0;border-left:3px solid #4CAF50">
-      <b>&#128249; {source['title']}</b> &nbsp; <code>{source['timestamp']}</code><br>
-      <small>{source['excerpt']}</small>
+    <div style="background:#F0FDFF;border-radius:8px;padding:12px;margin:4px 0;border-left:3px solid #06B6D4">
+      <b style="color:#0891B2">&#128249; {source['title']}</b> &nbsp;
+      <code style="background:#E0F7FA;color:#0891B2;padding:1px 6px;border-radius:4px">{source['timestamp']}</code><br>
+      <small style="color:#374151">{source['excerpt']}</small>
     </div>
     """,
         unsafe_allow_html=True,
@@ -126,6 +127,58 @@ def extract_video_id(url: str) -> str | None:
 # Page config
 # ---------------------------------------------------------------------------
 st.set_page_config(layout="wide", page_title="Meeting Intelligence")
+
+# ---------------------------------------------------------------------------
+# Global theme — 水藍色系
+# ---------------------------------------------------------------------------
+st.markdown(
+    """
+    <style>
+    /* Primary accent: cyan-500 #06B6D4, darker #0891B2 */
+    :root {
+        --accent:      #06B6D4;
+        --accent-dark: #0891B2;
+        --accent-pale: #F0FDFF;
+    }
+
+    /* Sidebar background */
+    [data-testid="stSidebar"] {
+        background: #0F1E2E;
+    }
+    [data-testid="stSidebar"] * {
+        color: #CBD5E1 !important;
+    }
+
+    /* Buttons */
+    .stButton > button {
+        background: var(--accent) !important;
+        color: #fff !important;
+        border: none !important;
+        border-radius: 8px !important;
+        font-weight: 600 !important;
+        transition: background 0.2s;
+    }
+    .stButton > button:hover {
+        background: var(--accent-dark) !important;
+    }
+
+    /* Chat input */
+    [data-testid="stChatInput"] textarea {
+        border: 1.5px solid var(--accent) !important;
+        border-radius: 10px !important;
+    }
+
+    /* Checkbox accent */
+    input[type="checkbox"]:checked {
+        accent-color: var(--accent) !important;
+    }
+
+    /* Divider */
+    hr { border-color: #1E3A4A !important; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
 # ---------------------------------------------------------------------------
 # Session state initialisation
@@ -237,13 +290,13 @@ if selected_ids:
         if m["video_id"] in selected_ids
     ]
     badge_html = " ".join(
-        f'<span style="background:#4CAF50;color:white;border-radius:12px;padding:2px 10px;margin:2px;font-size:0.85em">{t}</span>'
+        f'<span style="background:#06B6D4;color:white;border-radius:12px;padding:2px 10px;margin:2px;font-size:0.85em">{t}</span>'
         for t in selected_titles
     )
     st.markdown(f"**Selected:** {badge_html}", unsafe_allow_html=True)
 else:
     st.markdown(
-        '<span style="color:#888;font-size:0.9em">No meetings selected</span>',
+        '<span style="color:#06B6D4;font-size:0.9em;opacity:0.7">No meetings selected</span>',
         unsafe_allow_html=True,
     )
 
