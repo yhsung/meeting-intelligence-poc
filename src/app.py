@@ -12,10 +12,18 @@ fetcher = chunker = vector_store = query_engine = None
 
 if not MOCK_MODE:
     try:
-        from src import fetcher as _fetcher
-        from src import chunker as _chunker
-        from src import vector_store as _vector_store
-        from src import query_engine as _query_engine
+        # Streamlit adds src/ to sys.path when running `streamlit run src/app.py`,
+        # so direct imports work. We also try the src-package form as fallback.
+        try:
+            import fetcher as _fetcher
+            import chunker as _chunker
+            import vector_store as _vector_store
+            import query_engine as _query_engine
+        except ImportError:
+            from src import fetcher as _fetcher
+            from src import chunker as _chunker
+            from src import vector_store as _vector_store
+            from src import query_engine as _query_engine
 
         fetcher = _fetcher
         chunker = _chunker
@@ -23,47 +31,50 @@ if not MOCK_MODE:
         query_engine = _query_engine
         _real_modules_loaded = True
     except Exception:
+        import traceback
+        _import_error_detail = traceback.format_exc()
         MOCK_MODE = True
+
+_import_error_detail = locals().get("_import_error_detail", "")
 
 # ---------------------------------------------------------------------------
 # Mock data & helpers
 # ---------------------------------------------------------------------------
 MOCK_MEETINGS = [
-    {"video_id": "mock001", "title": "Q2 Planning Meeting (Mock)", "chunk_count": 42},
-    {"video_id": "mock002", "title": "Team Retrospective (Mock)", "chunk_count": 38},
-    {"video_id": "mock003", "title": "Product Review (Mock)", "chunk_count": 55},
+    {"video_id": "mock001", "title": "Q2 Planning Meeting", "chunk_count": 42},
+    {"video_id": "mock002", "title": "Team Retrospective", "chunk_count": 38},
+    {"video_id": "mock003", "title": "Product Review", "chunk_count": 55},
 ]
 
 
 def mock_ask(question, video_ids):
     return {
         "answer": (
-            f"[MOCK] Based on the selected meetings, here is a simulated answer to: '{question}'\n\n"
+            f"Based on the selected meetings, here is a simulated answer to: *'{question}'*\n\n"
             "The meetings discussed several key points related to your question. "
             "The team reached a consensus on the main direction and identified action items for follow-up."
         ),
         "sources": [
             {
                 "video_id": video_ids[0] if video_ids else "mock001",
-                "title": "Q2 Planning Meeting (Mock)",
+                "title": "Q2 Planning Meeting",
                 "timestamp": "14:32",
-                "excerpt": "We decided to prioritize the new feature based on user feedback...",
+                "excerpt": "We decided to prioritize the new feature based on user feedback showing strong demand across all segments.",
             },
             {
                 "video_id": video_ids[0] if video_ids else "mock001",
-                "title": "Q2 Planning Meeting (Mock)",
+                "title": "Q2 Planning Meeting",
                 "timestamp": "28:15",
-                "excerpt": "The timeline was set for end of quarter delivery...",
+                "excerpt": "The timeline was set for end of quarter delivery with a mid-sprint checkpoint scheduled.",
             },
         ],
     }
 
 
 def mock_add_meeting(url: str):
-    """Simulate adding a meeting from a YouTube URL in mock mode."""
     import random
     fake_id = f"mock{random.randint(100, 999)}"
-    fake_title = f"New Meeting ({url[-11:] if len(url) >= 11 else url}) (Mock)"
+    fake_title = f"New Meeting ({url[-11:] if len(url) >= 11 else url})"
     return {"video_id": fake_id, "title": fake_title, "chunk_count": random.randint(20, 80)}
 
 
@@ -71,26 +82,49 @@ def mock_add_meeting(url: str):
 # Real-mode helpers
 # ---------------------------------------------------------------------------
 
+def _get_store():
+    """Return a cached VectorStore instance from session state."""
+    if "store" not in st.session_state:
+        st.session_state.store = vector_store.VectorStore(db_path="data/vectordb")
+    return st.session_state.store
+
+
+def _get_engine():
+    """Return a cached QueryEngine instance from session state."""
+    if "engine" not in st.session_state:
+        st.session_state.engine = query_engine.QueryEngine(db_path="data/vectordb")
+    return st.session_state.engine
+
+
 def real_list_meetings():
-    """Return list of indexed meetings from the vector store."""
     try:
-        return vector_store.list_meetings()
+        return _get_store().list_meetings()
     except Exception as exc:
         st.error(f"Failed to load meetings: {exc}")
         return []
 
 
 def real_add_meeting(url: str):
-    """Fetch, chunk and index a meeting from a YouTube URL."""
-    transcript = fetcher.fetch(url)
-    chunks = chunker.chunk(transcript)
-    vector_store.index(chunks)
-    return vector_store.get_meeting_by_url(url)
+    # 1. Fetch transcript (cached to data/transcripts/{video_id}.json)
+    transcript = fetcher.fetch_transcript(url)
+    video_id = transcript["video_id"]
+
+    # 2. Chunk + embed (saved to data/chunks/{video_id}_chunks.json)
+    transcript_path = f"data/transcripts/{video_id}.json"
+    chunks = chunker.process_transcript(transcript_path)
+
+    # 3. Index into vector store
+    _get_store().add_meeting(video_id, chunks)
+
+    return {
+        "video_id": video_id,
+        "title": transcript["title"],
+        "chunk_count": len(chunks),
+    }
 
 
 def real_ask(question: str, video_ids):
-    """Query the indexed meetings and return answer + sources."""
-    return query_engine.ask(question, list(video_ids))
+    return _get_engine().ask(question, list(video_ids))
 
 
 # ---------------------------------------------------------------------------
@@ -100,81 +134,316 @@ def real_ask(question: str, video_ids):
 def render_source_card(source):
     st.markdown(
         f"""
-    <div style="background:#F0FDFF;border-radius:8px;padding:12px;margin:4px 0;border-left:3px solid #06B6D4">
-      <b style="color:#0891B2">&#128249; {source['title']}</b> &nbsp;
-      <code style="background:#E0F7FA;color:#0891B2;padding:1px 6px;border-radius:4px">{source['timestamp']}</code><br>
-      <small style="color:#374151">{source['excerpt']}</small>
-    </div>
-    """,
+        <div style="
+            background: linear-gradient(135deg, rgba(13,20,36,0.98) 0%, rgba(15,26,46,0.98) 100%);
+            border: 1px solid rgba(34,211,238,0.18);
+            border-radius: 10px;
+            padding: 14px 16px;
+            margin: 6px 0;
+            position: relative;
+            overflow: hidden;
+        ">
+            <div style="
+                position: absolute; top: 0; left: 0; right: 0; height: 1px;
+                background: linear-gradient(90deg, transparent 0%, rgba(34,211,238,0.6) 50%, transparent 100%);
+            "></div>
+            <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:12px; margin-bottom:8px">
+                <span style="
+                    font-family: 'Syne', sans-serif;
+                    font-weight: 700;
+                    font-size: 0.82rem;
+                    color: #CBD5E1;
+                    line-height: 1.3;
+                ">&#9654; {source['title']}</span>
+                <code style="
+                    font-family: 'JetBrains Mono', monospace;
+                    font-size: 0.7rem;
+                    color: #22D3EE;
+                    background: rgba(34,211,238,0.08);
+                    border: 1px solid rgba(34,211,238,0.25);
+                    padding: 2px 8px;
+                    border-radius: 4px;
+                    letter-spacing: 0.06em;
+                    white-space: nowrap;
+                    flex-shrink: 0;
+                ">{source['timestamp']}</code>
+            </div>
+            <p style="
+                font-family: 'Instrument Sans', sans-serif;
+                font-size: 0.8rem;
+                color: #475569;
+                margin: 0;
+                line-height: 1.55;
+                font-style: italic;
+            ">"{source['excerpt']}"</p>
+        </div>
+        """,
         unsafe_allow_html=True,
     )
 
 
 def extract_video_id(url: str) -> str | None:
-    """Return the YouTube video ID from a URL, or None if not parseable."""
     import re
-    patterns = [
-        r"(?:v=|youtu\.be/|embed/|shorts/)([A-Za-z0-9_-]{11})",
-    ]
-    for pat in patterns:
-        m = re.search(pat, url)
-        if m:
-            return m.group(1)
-    return None
+    m = re.search(r"(?:v=|youtu\.be/|embed/|shorts/)([A-Za-z0-9_-]{11})", url)
+    return m.group(1) if m else None
 
 
 # ---------------------------------------------------------------------------
 # Page config
 # ---------------------------------------------------------------------------
-st.set_page_config(layout="wide", page_title="Meeting Intelligence")
+st.set_page_config(layout="wide", page_title="Meeting Intelligence", page_icon="◈")
 
 # ---------------------------------------------------------------------------
-# Global theme — 水藍色系
+# Global theme injection
 # ---------------------------------------------------------------------------
 st.markdown(
     """
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@400;500&family=Instrument+Sans:ital,wght@0,400;0,500;0,600;1,400&display=swap" rel="stylesheet">
+
     <style>
-    /* Primary accent: cyan-500 #06B6D4, darker #0891B2 */
+    /* ── Variables ──────────────────────────────────────────── */
     :root {
-        --accent:      #06B6D4;
-        --accent-dark: #0891B2;
-        --accent-pale: #F0FDFF;
+        --bg:          #07090F;
+        --bg-surface:  #0C1422;
+        --bg-elevated: #101C30;
+        --accent:      #22D3EE;
+        --accent-dim:  #0891B2;
+        --accent-glow: rgba(34, 211, 238, 0.12);
+        --accent-bd:   rgba(34, 211, 238, 0.22);
+        --text-hi:     #E2E8F0;
+        --text-mid:    #94A3B8;
+        --text-lo:     #334155;
+        --border:      rgba(255, 255, 255, 0.055);
     }
 
-    /* Sidebar background */
+    /* ── Base ───────────────────────────────────────────────── */
+    .stApp {
+        background: var(--bg) !important;
+        font-family: 'Instrument Sans', sans-serif !important;
+    }
+
+    /* Dot-grid texture */
+    .stApp::before {
+        content: '';
+        position: fixed;
+        inset: 0;
+        background-image: radial-gradient(circle, rgba(34,211,238,0.07) 1px, transparent 1px);
+        background-size: 28px 28px;
+        pointer-events: none;
+        z-index: 0;
+    }
+
+    .main .block-container {
+        padding: 2.5rem 3rem 4rem !important;
+        max-width: none !important;
+    }
+
+    /* Hide default Streamlit header */
+    [data-testid="stHeader"] {
+        background: transparent !important;
+        border-bottom: none !important;
+    }
+
+    /* ── Sidebar ────────────────────────────────────────────── */
     [data-testid="stSidebar"] {
-        background: #0F1E2E;
+        background: var(--bg-surface) !important;
+        border-right: 1px solid var(--accent-bd) !important;
     }
-    [data-testid="stSidebar"] * {
-        color: #CBD5E1 !important;
+    [data-testid="stSidebarContent"] {
+        background: transparent !important;
+        padding: 1.75rem 1.25rem !important;
+    }
+    [data-testid="stSidebar"] p,
+    [data-testid="stSidebar"] span,
+    [data-testid="stSidebar"] label,
+    [data-testid="stSidebar"] div {
+        color: var(--text-mid) !important;
+        font-family: 'Instrument Sans', sans-serif !important;
     }
 
-    /* Buttons */
+    /* ── Typography ─────────────────────────────────────────── */
+    h1, h2, h3 {
+        font-family: 'Syne', sans-serif !important;
+        color: var(--text-hi) !important;
+    }
+
+    /* ── Buttons ────────────────────────────────────────────── */
     .stButton > button {
-        background: var(--accent) !important;
-        color: #fff !important;
-        border: none !important;
-        border-radius: 8px !important;
+        background: transparent !important;
+        color: var(--accent) !important;
+        border: 1px solid var(--accent-bd) !important;
+        border-radius: 7px !important;
+        font-family: 'Instrument Sans', sans-serif !important;
         font-weight: 600 !important;
-        transition: background 0.2s;
+        font-size: 0.8rem !important;
+        letter-spacing: 0.07em !important;
+        text-transform: uppercase !important;
+        padding: 0.45rem 1rem !important;
+        transition: all 0.18s ease !important;
     }
     .stButton > button:hover {
-        background: var(--accent-dark) !important;
+        background: var(--accent-glow) !important;
+        border-color: var(--accent) !important;
+        box-shadow: 0 0 18px var(--accent-glow), 0 0 6px rgba(34,211,238,0.15) !important;
+        color: var(--accent) !important;
+    }
+    .stButton > button:active {
+        transform: scale(0.98) !important;
     }
 
-    /* Chat input */
+    /* ── Text Input ─────────────────────────────────────────── */
+    [data-testid="stTextInput"] input {
+        background: var(--bg-elevated) !important;
+        border: 1px solid var(--border) !important;
+        border-radius: 7px !important;
+        color: var(--text-hi) !important;
+        font-family: 'Instrument Sans', sans-serif !important;
+        font-size: 0.875rem !important;
+        transition: border-color 0.18s, box-shadow 0.18s !important;
+    }
+    [data-testid="stTextInput"] input:focus {
+        border-color: var(--accent) !important;
+        box-shadow: 0 0 0 3px var(--accent-glow) !important;
+        outline: none !important;
+    }
+    [data-testid="stTextInput"] input::placeholder {
+        color: var(--text-lo) !important;
+    }
+    [data-testid="stTextInput"] label {
+        font-family: 'JetBrains Mono', monospace !important;
+        font-size: 0.65rem !important;
+        font-weight: 500 !important;
+        color: var(--accent-dim) !important;
+        letter-spacing: 0.1em !important;
+        text-transform: uppercase !important;
+    }
+
+    /* ── Chat Input ─────────────────────────────────────────── */
+    [data-testid="stChatInput"] {
+        background: var(--bg-surface) !important;
+        border: 1px solid var(--accent-bd) !important;
+        border-radius: 12px !important;
+        transition: border-color 0.18s, box-shadow 0.18s !important;
+    }
+    [data-testid="stChatInput"]:focus-within {
+        border-color: var(--accent) !important;
+        box-shadow: 0 0 0 3px var(--accent-glow) !important;
+    }
     [data-testid="stChatInput"] textarea {
-        border: 1.5px solid var(--accent) !important;
-        border-radius: 10px !important;
+        background: transparent !important;
+        color: var(--text-hi) !important;
+        font-family: 'Instrument Sans', sans-serif !important;
+        font-size: 0.9rem !important;
+    }
+    [data-testid="stChatInput"] textarea::placeholder {
+        color: var(--text-lo) !important;
     }
 
-    /* Checkbox accent */
-    input[type="checkbox"]:checked {
+    /* ── Chat Messages ──────────────────────────────────────── */
+    [data-testid="stChatMessage"] {
+        background: transparent !important;
+        border: none !important;
+        padding: 4px 0 !important;
+    }
+    /* User bubble */
+    [data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarUser"]) [data-testid="stMarkdownContainer"] {
+        background: rgba(34,211,238,0.05) !important;
+        border: 1px solid rgba(34,211,238,0.12) !important;
+        border-radius: 12px 12px 4px 12px !important;
+        padding: 12px 16px !important;
+        color: var(--text-hi) !important;
+    }
+    /* AI bubble */
+    [data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarAssistant"]) [data-testid="stMarkdownContainer"] {
+        background: var(--bg-elevated) !important;
+        border: 1px solid var(--border) !important;
+        border-left: 2px solid var(--accent-bd) !important;
+        border-radius: 4px 12px 12px 12px !important;
+        padding: 12px 16px !important;
+        color: var(--text-hi) !important;
+    }
+    [data-testid="stMarkdownContainer"] p {
+        color: var(--text-hi) !important;
+        font-family: 'Instrument Sans', sans-serif !important;
+        font-size: 0.9rem !important;
+        line-height: 1.65 !important;
+    }
+
+    /* ── Expander ───────────────────────────────────────────── */
+    [data-testid="stExpander"] {
+        background: var(--bg-elevated) !important;
+        border: 1px solid var(--border) !important;
+        border-radius: 8px !important;
+        margin-top: 8px !important;
+    }
+    [data-testid="stExpander"] summary {
+        font-family: 'JetBrains Mono', monospace !important;
+        font-size: 0.68rem !important;
+        font-weight: 500 !important;
+        color: var(--text-lo) !important;
+        letter-spacing: 0.1em !important;
+        text-transform: uppercase !important;
+        padding: 10px 14px !important;
+    }
+    [data-testid="stExpander"] summary:hover {
+        color: var(--accent) !important;
+    }
+
+    /* ── Checkbox ───────────────────────────────────────────── */
+    [data-testid="stCheckbox"] label {
+        color: var(--text-mid) !important;
+        font-size: 0.875rem !important;
+        font-family: 'Instrument Sans', sans-serif !important;
+        transition: color 0.15s !important;
+    }
+    [data-testid="stCheckbox"]:has(input:checked) label {
+        color: var(--text-hi) !important;
+    }
+    input[type="checkbox"] {
         accent-color: var(--accent) !important;
     }
 
-    /* Divider */
-    hr { border-color: #1E3A4A !important; }
+    /* ── Alerts ─────────────────────────────────────────────── */
+    [data-testid="stAlert"] {
+        background: var(--bg-elevated) !important;
+        border-radius: 8px !important;
+        border: 1px solid var(--border) !important;
+        font-family: 'Instrument Sans', sans-serif !important;
+        font-size: 0.85rem !important;
+    }
+
+    /* ── Divider ────────────────────────────────────────────── */
+    hr {
+        border: none !important;
+        border-top: 1px solid var(--border) !important;
+        margin: 1rem 0 !important;
+    }
+
+    /* ── Caption ────────────────────────────────────────────── */
+    [data-testid="stCaptionContainer"] p {
+        font-family: 'JetBrains Mono', monospace !important;
+        font-size: 0.65rem !important;
+        color: var(--text-lo) !important;
+        letter-spacing: 0.06em !important;
+    }
+
+    /* ── Spinner ────────────────────────────────────────────── */
+    [data-testid="stSpinner"] svg {
+        stroke: var(--accent) !important;
+    }
+
+    /* ── Scrollbar ──────────────────────────────────────────── */
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: var(--bg); }
+    ::-webkit-scrollbar-thumb {
+        background: rgba(34,211,238,0.25);
+        border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+        background: rgba(34,211,238,0.45);
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -193,40 +462,98 @@ if "mock_mode" not in st.session_state:
     st.session_state.mock_mode = MOCK_MODE
 
 if "indexed_meetings" not in st.session_state:
-    st.session_state.indexed_meetings = list(MOCK_MEETINGS) if st.session_state.mock_mode else real_list_meetings()
+    st.session_state.indexed_meetings = (
+        list(MOCK_MEETINGS) if st.session_state.mock_mode else real_list_meetings()
+    )
 
 # ---------------------------------------------------------------------------
 # Sidebar
 # ---------------------------------------------------------------------------
 with st.sidebar:
-    st.title("Meeting Knowledge Base")
+    # Brand header
+    st.markdown(
+        """
+        <div style="padding: 4px 0 24px 0">
+            <div style="
+                font-family: 'Syne', sans-serif;
+                font-size: 1.15rem;
+                font-weight: 800;
+                color: #E2E8F0;
+                letter-spacing: -0.01em;
+                line-height: 1.2;
+            ">MEETING<br><span style="color:#22D3EE">INTEL</span></div>
+            <div style="
+                font-family: 'JetBrains Mono', monospace;
+                font-size: 0.6rem;
+                color: #334155;
+                letter-spacing: 0.14em;
+                margin-top: 5px;
+            ">KNOWLEDGE BASE v1.0</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
     if st.session_state.mock_mode:
-        st.caption("Running in MOCK mode — no real API calls are made.")
+        st.markdown(
+            """
+            <div style="
+                font-family: 'JetBrains Mono', monospace;
+                font-size: 0.62rem;
+                color: #0891B2;
+                background: rgba(34,211,238,0.06);
+                border: 1px solid rgba(34,211,238,0.15);
+                border-radius: 5px;
+                padding: 5px 9px;
+                letter-spacing: 0.08em;
+                margin-bottom: 12px;
+            ">◈ MOCK MODE — no API calls</div>
+            """,
+            unsafe_allow_html=True,
+        )
+        if _import_error_detail:
+            with st.expander("Import error detail", expanded=False):
+                st.code(_import_error_detail, language="text")
 
-    st.subheader("Indexed Meetings")
+    # Section label
+    st.markdown(
+        '<p style="font-family:\'JetBrains Mono\',monospace;font-size:0.62rem;color:#22D3EE;'
+        'letter-spacing:0.12em;text-transform:uppercase;margin:0 0 10px 0">// Indexed Meetings</p>',
+        unsafe_allow_html=True,
+    )
 
     meetings = st.session_state.indexed_meetings
 
     if not meetings:
-        st.info("No meetings indexed yet. Add one below.")
+        st.info("No meetings indexed yet.")
     else:
-        # Build a set of currently checked ids outside the loop to avoid mutation issues
         new_selected = set()
         for meeting in meetings:
             vid = meeting["video_id"]
             checked = vid in st.session_state.selected_video_ids
-            label = f"{meeting['title']}  \n_({meeting['chunk_count']} chunks)_"
-            if st.checkbox(label, value=checked, key=f"chk_{vid}"):
+            label = (
+                f"{meeting['title']}  \n"
+                f"<span style=\"font-family:'JetBrains Mono',monospace;font-size:0.65rem;"
+                f"color:#334155\">{meeting['chunk_count']} chunks</span>"
+            )
+            if st.checkbox(meeting["title"], value=checked, key=f"chk_{vid}"):
                 new_selected.add(vid)
+            # Chunk count hint below each checkbox
+            st.markdown(
+                f'<div style="font-family:\'JetBrains Mono\',monospace;font-size:0.6rem;'
+                f'color:#22415A;margin:-10px 0 8px 28px">{meeting["chunk_count"]} segments indexed</div>',
+                unsafe_allow_html=True,
+            )
         st.session_state.selected_video_ids = new_selected
 
     st.divider()
 
-    # ------------------------------------------------------------------
     # Add meeting
-    # ------------------------------------------------------------------
-    st.subheader("Add Meeting")
+    st.markdown(
+        '<p style="font-family:\'JetBrains Mono\',monospace;font-size:0.62rem;color:#22D3EE;'
+        'letter-spacing:0.12em;text-transform:uppercase;margin:0 0 10px 0">// Add Meeting</p>',
+        unsafe_allow_html=True,
+    )
     new_url = st.text_input(
         "YouTube URL",
         placeholder="https://www.youtube.com/watch?v=...",
@@ -238,7 +565,7 @@ with st.sidebar:
         if not url:
             st.error("Please enter a YouTube URL.")
         elif extract_video_id(url) is None and not st.session_state.mock_mode:
-            st.error("Invalid YouTube URL. Please check and try again.")
+            st.error("Invalid YouTube URL.")
         else:
             try:
                 if st.session_state.mock_mode:
@@ -257,7 +584,6 @@ with st.sidebar:
                     with st.spinner("Indexing..."):
                         new_meeting = vector_store.index_and_return(chunks)
 
-                # Avoid duplicates
                 existing_ids = {m["video_id"] for m in st.session_state.indexed_meetings}
                 if new_meeting["video_id"] not in existing_ids:
                     st.session_state.indexed_meetings.append(new_meeting)
@@ -269,34 +595,67 @@ with st.sidebar:
 
     st.divider()
 
-    # ------------------------------------------------------------------
-    # Clear conversation
-    # ------------------------------------------------------------------
     if st.button("Clear Conversation", use_container_width=True):
         st.session_state.messages = []
         st.rerun()
 
 # ---------------------------------------------------------------------------
-# Main area
+# Main area — header
 # ---------------------------------------------------------------------------
-st.title("Ask Your Meetings")
+selected_ids = st.session_state.selected_video_ids
+selected_titles = [
+    m["title"]
+    for m in st.session_state.indexed_meetings
+    if m["video_id"] in selected_ids
+]
+
+st.markdown(
+    """
+    <div style="padding: 4px 0 24px 0">
+        <h1 style="
+            font-family: 'Syne', sans-serif;
+            font-size: 2.6rem;
+            font-weight: 800;
+            color: #E2E8F0;
+            letter-spacing: -0.03em;
+            margin: 0 0 4px 0;
+            line-height: 1.1;
+        ">Ask Your <span style="color:#22D3EE">Meetings</span></h1>
+        <p style="
+            font-family: 'Instrument Sans', sans-serif;
+            font-size: 0.875rem;
+            color: #334155;
+            margin: 0;
+        ">Query the knowledge base with natural language — sources included.</p>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 
 # Selected-meeting badges
-selected_ids = st.session_state.selected_video_ids
-if selected_ids:
-    selected_titles = [
-        m["title"]
-        for m in st.session_state.indexed_meetings
-        if m["video_id"] in selected_ids
-    ]
-    badge_html = " ".join(
-        f'<span style="background:#06B6D4;color:white;border-radius:12px;padding:2px 10px;margin:2px;font-size:0.85em">{t}</span>'
+if selected_titles:
+    badges = " ".join(
+        f'<span style="'
+        f'display:inline-flex;align-items:center;gap:5px;'
+        f'border:1px solid rgba(34,211,238,0.35);'
+        f'color:#22D3EE;border-radius:20px;padding:3px 11px;margin:2px;'
+        f'font-family:\'Instrument Sans\',sans-serif;font-size:0.78rem;font-weight:600;'
+        f'background:rgba(34,211,238,0.06);letter-spacing:0.01em'
+        f'"><span style="width:5px;height:5px;border-radius:50%;background:#22D3EE;'
+        f'display:inline-block;box-shadow:0 0 6px #22D3EE"></span>{t}</span>'
         for t in selected_titles
     )
-    st.markdown(f"**Selected:** {badge_html}", unsafe_allow_html=True)
+    st.markdown(
+        f'<div style="margin-bottom:16px"><span style="font-family:\'JetBrains Mono\',monospace;'
+        f'font-size:0.62rem;color:#334155;letter-spacing:0.1em;text-transform:uppercase;'
+        f'margin-right:8px">Active</span>{badges}</div>',
+        unsafe_allow_html=True,
+    )
 else:
     st.markdown(
-        '<span style="color:#06B6D4;font-size:0.9em;opacity:0.7">No meetings selected</span>',
+        '<div style="margin-bottom:16px;font-family:\'JetBrains Mono\',monospace;'
+        'font-size:0.7rem;color:#22415A;letter-spacing:0.08em">'
+        '◌ No meetings selected — choose from sidebar</div>',
         unsafe_allow_html=True,
     )
 
@@ -309,30 +668,28 @@ for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
         if msg["role"] == "assistant" and msg.get("sources"):
-            with st.expander("Sources", expanded=False):
+            with st.expander("SOURCES", expanded=False):
                 for src in msg["sources"]:
                     render_source_card(src)
 
 # ---------------------------------------------------------------------------
 # Chat input
 # ---------------------------------------------------------------------------
-user_input = st.chat_input("Ask a question about your meetings...")
+user_input = st.chat_input("Ask anything about your selected meetings...")
 
 if user_input:
     if not st.session_state.selected_video_ids:
-        st.warning("Please select at least one meeting from the sidebar.")
+        st.warning("Select at least one meeting from the sidebar first.")
     else:
-        # Append user message
         st.session_state.messages.append({"role": "user", "content": user_input, "sources": []})
         with st.chat_message("user"):
             st.markdown(user_input)
 
-        # Get answer
         with st.chat_message("assistant"):
             with st.spinner("Searching meetings..."):
                 try:
                     if st.session_state.mock_mode:
-                        time.sleep(0.8)  # simulate latency
+                        time.sleep(0.8)
                         result = mock_ask(user_input, list(st.session_state.selected_video_ids))
                     else:
                         result = real_ask(user_input, st.session_state.selected_video_ids)
@@ -340,17 +697,16 @@ if user_input:
                     answer = result.get("answer", "No answer returned.")
                     sources = result.get("sources", [])
                 except Exception as exc:
-                    answer = f"An error occurred while querying meetings: {exc}"
+                    answer = f"An error occurred: {exc}"
                     sources = []
 
             st.markdown(answer)
 
             if sources:
-                with st.expander("Sources", expanded=True):
+                with st.expander("SOURCES", expanded=True):
                     for src in sources:
                         render_source_card(src)
 
-        # Persist assistant message
         st.session_state.messages.append(
             {"role": "assistant", "content": answer, "sources": sources}
         )
